@@ -1,0 +1,96 @@
+import express from "express";
+import cors from "cors";
+import { GoogleGenAI } from "@google/genai";
+
+const app = express();
+
+app.use(cors());
+app.use(express.json({ limit: "1mb" }));
+
+const PORT = process.env.PORT || 3000;
+
+const apiKey = process.env.GEMINI_API_KEY;
+
+if (!apiKey) {
+  console.error("GEMINI_API_KEY is missing.");
+  process.exit(1);
+}
+
+const ai = new GoogleGenAI({
+  apiKey: apiKey
+});
+
+app.get("/", (req, res) => {
+  res.json({
+    status: "online",
+    service: "NOVA Gemini Backend"
+  });
+});
+
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { message, pageText = "", selectedText = "", history = [] } = req.body;
+
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({
+        error: "Message is required."
+      });
+    }
+
+    const safePageText = String(pageText).slice(0, 20000);
+    const safeSelectedText = String(selectedText).slice(0, 8000);
+
+    const conversation = Array.isArray(history)
+      ? history
+          .slice(-10)
+          .map(item => {
+            const role = item.role === "model" ? "model" : "user";
+            return `${role}: ${String(item.text || "").slice(0, 4000)}`;
+          })
+          .join("\n")
+      : "";
+
+    const prompt = `
+You are NOVA, an intelligent AI browser assistant.
+
+Answer the user's request clearly and accurately.
+
+CURRENT WEBPAGE TEXT:
+${safePageText || "(No webpage text available)"}
+
+SELECTED TEXT:
+${safeSelectedText || "(Nothing selected)"}
+
+RECENT CONVERSATION:
+${conversation || "(No previous conversation)"}
+
+USER REQUEST:
+${message}
+
+Important:
+- If the user asks about the webpage, use the webpage information above.
+- If the webpage information does not contain the answer, say so instead of inventing facts.
+- Keep answers useful and reasonably concise.
+`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.7-flash",
+      contents: prompt
+    });
+
+    res.json({
+      reply: response.text || "Gemini returned an empty response."
+    });
+
+  } catch (error) {
+    console.error("Gemini error:", error);
+
+    res.status(500).json({
+      error: "Gemini request failed."
+    });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`NOVA backend running on port ${PORT}`);
+});
